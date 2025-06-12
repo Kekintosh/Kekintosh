@@ -16,7 +16,7 @@ class Player:
 
         self.last_mouse_pos = None
         self.position, self.rotation = [x, y, z], rotation
-        self.speed = 0.03
+        self.speed = 0.06
         self.gl = gl
         self.gravity = 5.8
         self.tVel = 50
@@ -77,98 +77,95 @@ class Player:
                 elif self.rotation[0] < -90:
                     self.rotation[0] = -90
 
+            DX, DY, DZ = 0, 0, 0
+            minKd = 0.08
+
             # Initialize movement state if not exists
-            if not hasattr(self, 'move_forward'):
-                self.move_forward = 0.0
-            if not hasattr(self, 'move_strafe'):
-                self.move_strafe = 0.0
             if not hasattr(self, 'is_sprinting'):
                 self.is_sprinting = False
 
             key = pygame.key.get_pressed()
         
-            # Reset movement input
-            self.move_forward = 0.0
-            self.move_strafe = 0.0
+            # Calculate base movement speed
+            rotY = self.rotation[1] / 180 * math.pi
+            base_speed = self.speed
         
-            # Handle input - Minecraft style
-            if self.kW > 0 or key[pygame.K_w]:
-                self.move_forward += 1.0
-                if self.kW > 0:
-                    self.kW -= 0.08
-                
-            if self.kS > 0 or key[pygame.K_s]:
-                self.move_forward -= 1.0
-                if self.kS > 0:
-                    self.kS -= 0.08
-                
-            if self.kA > 0 or key[pygame.K_a]:
-                self.move_strafe += 1.0
-                if self.kA > 0:
-                    self.kA -= 0.08
-                
-            if self.kD > 0 or key[pygame.K_d]:
-                self.move_strafe -= 1.0
-                if self.kD > 0:
-                    self.kD -= 0.08
-
-            # Sprint handling - exact Minecraft behavior
-            if key[pygame.K_LCTRL] and self.move_forward > 0:
+            # Handle sprinting
+            if key[pygame.K_LCTRL]:
                 self.is_sprinting = True
+                base_speed += 0.009  # Sprint boost
             else:
                 self.is_sprinting = False
-
-            # Sneak handling
-            is_sneaking = key[pygame.K_LSHIFT]
-            if is_sneaking:
+            
+            # Handle sneaking
+            if key[pygame.K_LSHIFT]:
                 self.setShift(True)
+                base_speed -= 0.01  # Sneak slowdown
             else:
                 self.setShift(False)
 
-            # Jump - only trigger once per press
+            dx = base_speed * math.sin(rotY)
+            dz = base_speed * math.cos(rotY)
+
+            # Movement input handling
+            if self.kW > 0 or key[pygame.K_w]:
+                DX += dx
+                DZ -= dz
+                self.setCameraShake()
+                if self.kW > 0:
+                    self.kW -= minKd
+                
+            if self.kS > 0 or key[pygame.K_s]:
+                DX -= dx
+                DZ += dz
+                self.setCameraShake()
+                if self.kS > 0:
+                    self.kS -= minKd
+                
+            if self.kA > 0 or key[pygame.K_a]:
+                DX -= dz
+                DZ -= dx
+                self.setCameraShake()
+                if self.kA > 0:
+                    self.kA -= minKd
+                
+            if self.kD > 0 or key[pygame.K_d]:
+                DX += dz
+                DZ += dx
+                self.setCameraShake()
+                if self.kD > 0:
+                    self.kD -= minKd
+
+            # Jump handling
             if key[pygame.K_SPACE]:
                 if not hasattr(self, 'space_pressed') or not self.space_pressed:
                     self.jump()
                     self.space_pressed = True
+                    # Maintain momentum when jumping
+                    if key[pygame.K_w]:
+                        self.kW = 1
+                    if key[pygame.K_a]:
+                        self.kA = 1
+                    if key[pygame.K_s]:
+                        self.kS = 1
+                    if key[pygame.K_d]:
+                        self.kD = 1
             else:
                 self.space_pressed = False
 
-            # Calculate movement - EXACT Minecraft mechanics
-            movement_speed = self.get_movement_speed(is_sneaking)
-        
-            # Apply movement multipliers
-            forward = self.move_forward * movement_speed
-            strafe = self.move_strafe * movement_speed
-        
-            # Diagonal movement normalization (Minecraft does this)
-            if self.move_forward != 0 and self.move_strafe != 0:
-                forward *= 0.7071067811865476  # 1/sqrt(2)
-                strafe *= 0.7071067811865476
+            dt = self.speed
+            self.position = [self.position[0] + DX, self.position[1] + DY, self.position[2] + DZ]
 
-            # Convert to world coordinates
-            rotY = self.rotation[1] / 180 * math.pi
-            sin_yaw = math.sin(rotY)
-            cos_yaw = math.cos(rotY)
-        
-            dx = strafe * cos_yaw - forward * sin_yaw
-            dz = forward * cos_yaw + strafe * sin_yaw
-        
-            # Camera shake for footsteps
-            if (abs(dx) > 0 or abs(dz) > 0) and abs(self.dy) < 0.1:
-                self.setCameraShake()
-
-            self.position = [self.position[0] + dx, self.position[1], self.position[2] + dz]
-
-            # Physics update
-            physics_dt = self.speed
-            if physics_dt < 0.2:
-                physics_dt /= 10
-                dx /= 10
-                dz /= 10
+            # Physics subdivision for smooth movement
+            if dt < 0.2:
+                dt /= 10
+                DX /= 10
+                DY /= 10
+                DZ /= 10
                 for i in range(10):
-                    self.move(physics_dt, dx, 0, dz)
+                    self.move(dt, DX, DY, DZ)
             else:
-                self.move(physics_dt, dx, 0, dz)
+                self.move(dt, DX, DY, DZ)
         else:
             self.move(self.speed, 0, 0, 0)
 
@@ -179,92 +176,102 @@ class Player:
                      -self.position[1] + self.shift + self.cameraShake[0],
                      -self.position[2])
 
-    def get_movement_speed(self, is_sneaking):
-        """Get movement speed based on current state - exact Minecraft values"""
-        # Use your existing speed as base multiplier
-        base_multiplier = self.speed * 50  # Convert 0.03 to reasonable movement
-    
-        if self.GODMODE == 1:
-            # Creative mode flying speed
-            if self.is_sprinting:
-                return base_multiplier * 4.0
-            else:
-                return base_multiplier * 2.0
-        else:
-            # Survival mode
-            if is_sneaking:
-                return base_multiplier * 0.3  # Sneaking
-            elif self.is_sprinting:
-                return base_multiplier * 1.3  # Sprinting
-            else:
-                return base_multiplier  # Walking
-
     def jump(self):
-        if self.GODMODE == 1:
-            # Creative mode - no jumping, handled in move()
+        if hasattr(self, 'GODMODE') and self.GODMODE == 1:
+            # Creative mode - handled in move()
             pass
         else:
-            # Survival mode - can only jump when on ground
-            if abs(self.dy) < 0.1:  # On ground
-                self.dy = 7.0  # Use a value that works with your physics
+            # Use your original jump value that worked
+            if not self.dy:
+                self.dy = 4
 
     def move(self, dt, dx, dy, dz):
-        if self.GODMODE == 1:
+        if hasattr(self, 'GODMODE') and self.GODMODE == 1:
             # Creative mode flight
             keys = pygame.key.get_pressed()
         
-            # Vertical movement in creative
             if keys[pygame.K_SPACE]:
-                self.dy = 0.2 * (dt * 20)  # Scale with dt
+                self.dy = 0.2 * (dt * 20)
             elif keys[pygame.K_LSHIFT]:
-                self.dy = -0.2 * (dt * 20)  # Scale with dt
+                self.dy = -0.2 * (dt * 20)
             else:
-                self.dy = 0  # Hover
+                self.dy = 0
             
             dy = self.dy * dt
         else:
-            # Survival mode gravity - use your existing values
-            if not hasattr(self, 'dy'):
-                self.dy = 0
-            
-            # Apply gravity using your existing gravity value
-            self.dy -= self.gravity * dt
-        
-            # Terminal velocity using your existing tVel
-            if self.dy < -self.tVel:
-                self.dy = -self.tVel
-            
-            dy = self.dy * dt
+            # Original physics system
+            self.dy -= dt * self.gravity
+            self.dy = max(self.dy, -self.tVel)
+            dy += self.dy * dt
+
+            if self.dy > 19.8:
+                self.dy = 19.8
 
         # Store original position for collision detection
         old_x, old_y, old_z = self.position
 
-        # Collision detection
+        # Use your original collision system
         x, y, z = self.position
         new_pos = self.collide((x + dx, y + dy, z + dz))
 
-        # Handle collision effects
-        if self.GODMODE != 1:
-            # Ground collision - reset falling velocity
-            if dy < 0 and new_pos[1] >= old_y:
-                self.dy = 0
-            # Ceiling collision - reset upward velocity  
-            elif dy > 0 and new_pos[1] <= old_y:
-                self.dy = 0
+        # Ground checks and sounds (from your original)
+        col2 = roundPos((new_pos[0], new_pos[1] - 2, new_pos[2]))
+        self.canShake = self.position[1] == new_pos[1]
+    
+        if self.position[0] != new_pos[0] or self.position[2] != new_pos[2]:
+            if col2 in self.gl.cubes.cubes and self.shift <= 0:
+                self.gl.blockSound.playStepSound(self.gl.cubes.cubes[col2].name)
 
-        # Ground checks and sounds
-        if self.GODMODE != 1:
-            col2 = roundPos((new_pos[0], new_pos[1] - 2, new_pos[2]))
-        
-            # Footstep sounds
-            if (self.position[0] != new_pos[0] or self.position[2] != new_pos[2]):
-                if col2 in self.gl.cubes.cubes and self.shift <= 0:
-                    self.gl.blockSound.playStepSound(self.gl.cubes.cubes[col2].name)
+        # Fall damage system (from your original)
+        if not hasattr(self, 'bInAir'):
+            self.bInAir = False
+            self.lastPlayerPosOnGround = [0, 0, 0]
+            self.playerFallY = 0
+
+        if not self.bInAir:
+            for i in range(1, 6):
+                col21 = roundPos((new_pos[0], new_pos[1] - i, new_pos[2]))
+                if col21 not in self.gl.cubes.cubes:
+                    self.bInAir = True
+                    if self.playerFallY < new_pos[1]:
+                        self.playerFallY = round(new_pos[1] - self.lastPlayerPosOnGround[1])
+                else:
+                    self.bInAir = False
+                    break
+        else:
+            self.lastPlayerPosOnGround = new_pos
+
+        if self.bInAir and col2 in self.gl.cubes.cubes:
+            if hasattr(self, 'hp') and self.hp > 0:
+                if 3 < self.playerFallY:
+                    self.hp -= 1
+                    if self.playerFallY < 10:
+                        self.hp -= 3
+                    elif self.playerFallY < 16:
+                        self.hp -= 5
+                    elif self.playerFallY < 23:
+                        self.hp -= 8
+                    elif self.playerFallY < 30:
+                        self.hp -= 11
+                    else:
+                        self.hp = 0
+                    self.gl.blockSound.cntr = 99
+                    self.gl.blockSound.damageByBlock(self.gl.cubes.cubes[col2].name, self.hp)
+            
+                if self.hp <= 0 and not self.playerDead:
+                    self.dead()
+
+            self.bInAir = False
+            if hasattr(self.gl, 'particles'):
+                self.gl.particles.addParticle((new_pos[0], new_pos[1] - 1, new_pos[2]),
+                                            self.gl.cubes.cubes[col2],
+                                            direction="down",
+                                            count=10)
 
         self.position = new_pos
 
     def collide(self, pos):
-        # Void damage
+        # Void damage (from your original)
         if -90 > pos[1] > -9000:
             if not self.playerDead:
                 self.hp -= 2
@@ -272,79 +279,27 @@ class Player:
                 if self.hp <= 0:
                     self.dead()
 
-        x, y, z = pos
-
-        # Minecraft collision order: Y, X, Z
-        new_y = self.collide_axis(self.position[0], y, self.position[2], 1)
-        new_x = self.collide_axis(x, new_y, self.position[2], 0)
-        new_z = self.collide_axis(new_x, new_y, z, 2)
-
-        return (new_x, new_y, new_z)
-
-    def collide_axis(self, x, y, z, axis):
-        """Single axis collision - exact Minecraft AABB collision"""
-        pos = [x, y, z]
+        # Use your original collision system that worked
+        p = list(pos)
         np = roundPos(pos)
-
-        # Player hitbox: 0.6 wide, 1.8 tall
-        # Minecraft uses 0.3 padding on X/Z, 0.0 on Y bottom, 1.8 on Y top
-    
-        if axis == 0:  # X axis
-            faces = [(-1, 0, 0), (1, 0, 0)]
-            pad = 0.3
-        elif axis == 1:  # Y axis  
-            faces = [(0, -1, 0), (0, 1, 0)]
-            pad = 0.0 if pos[1] < np[1] else 1.8  # Different padding for up/down
-        else:  # Z axis
-            faces = [(0, 0, -1), (0, 0, 1)]
-            pad = 0.3
-
-        for face in faces:
-            if not face[axis]:
-                continue
-            
-            d = (pos[axis] - np[axis]) * face[axis]
-        
-            if axis == 1:  # Y axis special case
-                if face[1] == -1:  # Moving down
-                    pad = 0.0
-                    if d < pad:
-                        continue
-                else:  # Moving up
-                    pad = 1.8
-                    if d < pad:
-                        continue
-            else:
+        for face in ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)):
+            for i in (0, 1, 2):
+                if not face[i]:
+                    continue
+                d = (p[i] - np[i]) * face[i]
+                pad = 0.25
                 if d < pad:
                     continue
-        
-            # Check collision boxes
-            collision_found = False
-        
-            if axis == 1:  # Y axis - check full player width
-                for dx in [-1, 0, 1]:
-                    for dz in [-1, 0, 1]:
-                        op = [np[0] + dx, np[1] + face[1], np[2] + dz]
-                        if tuple(op) in self.gl.cubes.collidable:
-                            collision_found = True
-                            break
-                    if collision_found:
-                        break
-            else:  # X/Z axis - check player height
-                for dy in [0, 1]:
+                for dy in (0, 1):
                     op = list(np)
                     op[1] -= dy
-                    op[axis] += face[axis]
-                
+                    op[i] += face[i]
                     if tuple(op) in self.gl.cubes.collidable:
-                        collision_found = True
+                        p[i] -= (d - pad) * face[i]
+                        if face[1]:
+                            self.dy = 0
                         break
-        
-            if collision_found:
-                pos[axis] -= (d - pad) * face[axis]
-                break
-
-        return pos[axis]
+        return tuple(p)
 
     # Keep existing methods unchanged
     def dead(self):
@@ -423,3 +378,24 @@ class Player:
 
     def is_moving(self):
         return self.moving
+
+    def setCameraShake(self):
+        if not self.canShake or self.shift > 0:
+            return
+
+        if not self.cameraShake[1]:
+            self.cameraShake[0] -= 0.007
+            if self.cameraShake[0] < -0.1:
+                self.cameraShake[1] = True
+        else:
+            self.cameraShake[0] += 0.007
+            if self.cameraShake[0] > 0.1:
+                self.cameraShake[1] = False
+
+    def setShift(self, b):
+        if b:
+            if self.shift < 0.17:
+                self.shift += 0.05
+        else:
+            if self.shift > 0:
+                self.shift -= 0.05
