@@ -67,40 +67,142 @@ def cube_vertices(pos, n=0.5):
     return tuple(tuple(k for j in i for k in v[j]) for i in
                  ((0, 1, 3, 2), (5, 4, 6, 7), (0, 4, 5, 1), (3, 7, 6, 2), (4, 0, 2, 6), (1, 5, 7, 3)))
 
-def slab_vertices(pos, n=0.5, upper=True):
-    """Generate vertices for a slab (half-block)"""
+def plant_vertices(pos, n=0.5):
+    """Generate vertices for cross-shaped plant geometry (2 intersecting planes)"""
     x, y, z = pos
-    height = n if upper else -n
-    # Top or bottom face vertices
-    v = (
-        (x-n, y+height, z-n), (x+n, y+height, z-n),
-        (x-n, y+height, z+n), (x+n, y+height, z+n),
-        (x-n, y-n, z-n), (x+n, y-n, z-n),
-        (x-n, y-n, z+n), (x+n, y-n, z+n)
+    
+    # First plane (diagonal from corner to corner)
+    plane1 = (
+        x - n, y - n, z - n,  # bottom-left
+        x + n, y - n, z + n,  # bottom-right  
+        x + n, y + n, z + n,  # top-right
+        x - n, y + n, z - n   # top-left
     )
     
-    if upper:
-        # Upper slab - show top and sides
-        faces = (
-            (0, 1, 3, 2),  # Top face
-            (5, 4, 6, 7),  # Bottom face (not visible normally)
-            (4, 0, 2, 6),  # Front face (lower part)
-            (1, 5, 7, 3),  # Back face (lower part)
-            (0, 4, 5, 1),  # Left face (full height)
-            (2, 3, 7, 6)   # Right face (full height)
-        )
-    else:
-        # Lower slab - show bottom and sides
-        faces = (
-            (0, 1, 3, 2),  # Top face (not visible normally)
-            (5, 4, 6, 7),  # Bottom face
-            (4, 0, 2, 6),  # Front face (upper part)
-            (1, 5, 7, 3),  # Back face (upper part)
-            (0, 4, 5, 1),  # Left face (full height)
-            (2, 3, 7, 6)   # Right face (full height)
-        )
+    # Second plane (perpendicular diagonal)
+    plane2 = (
+        x + n, y - n, z - n,  # bottom-left
+        x - n, y - n, z + n,  # bottom-right
+        x - n, y + n, z + n,  # top-right  
+        x + n, y + n, z - n   # top-left
+    )
     
-    return tuple(tuple(k for j in i for k in v[j]) for i in faces)
+    return (plane1, plane2)
+# Slab vertices (half-height cube)
+def slab_vertices(pos, n=0.5):
+    """Generate vertices for a slab (half-height block)"""
+    x, y, z = pos
+    
+    # Bottom half of a normal cube
+    v = tuple((x + X, y + Y, z + Z) for X in (-n, n) for Y in (-n, 0) for Z in (-n, n))
+    
+    # Return faces: left, right, bottom, top, back, front
+    return tuple(tuple(k for j in i for k in v[j]) for i in
+                 ((0, 1, 3, 2), (5, 4, 6, 7), (0, 4, 5, 1), (3, 7, 6, 2), (4, 0, 2, 6), (1, 5, 7, 3)))
+
+def stairs_vertices(pos, facing='north', n=0.5):
+    """Generate vertices for stairs based on facing direction"""
+    x, y, z = pos
+    
+    if facing == 'north':  # stairs going up towards north
+        # Bottom step (full width, half height, half depth)
+        bottom_step = [
+            # Bottom face
+            (x-n, y-n, z-n, x+n, y-n, z-n, x+n, y-n, z, x-n, y-n, z),
+            # Top face of bottom step
+            (x-n, y, z-n, x+n, y, z-n, x+n, y, z, x-n, y, z),
+            # Front face of bottom step
+            (x-n, y-n, z-n, x+n, y-n, z-n, x+n, y, z-n, x-n, y, z-n),
+            # Back face of bottom step
+            (x-n, y-n, z, x+n, y-n, z, x+n, y, z, x-n, y, z),
+            # Left face of bottom step
+            (x-n, y-n, z-n, x-n, y-n, z, x-n, y, z, x-n, y, z-n),
+            # Right face of bottom step
+            (x+n, y-n, z-n, x+n, y-n, z, x+n, y, z, x+n, y, z-n)
+        ]
+        
+        # Top step (full width, half height, half depth, offset up and back)
+        top_step = [
+            # Top face of top step
+            (x-n, y+n, z, x+n, y+n, z, x+n, y+n, z+n, x-n, y+n, z+n),
+            # Front face of top step
+            (x-n, y, z, x+n, y, z, x+n, y+n, z, x-n, y+n, z),
+            # Back face of top step
+            (x-n, y, z+n, x+n, y, z+n, x+n, y+n, z+n, x-n, y+n, z+n),
+            # Left face of top step
+            (x-n, y, z, x-n, y, z+n, x-n, y+n, z+n, x-n, y+n, z),
+            # Right face of top step
+            (x+n, y, z, x+n, y, z+n, x+n, y+n, z+n, x+n, y+n, z)
+        ]
+        
+        return bottom_step + top_step
+    
+    # Add other facing directions (south, east, west) as needed
+    elif facing == 'south':
+        # Mirror the north case
+        return stairs_vertices((x, y, z), 'north', n)  # Simplified for now
+    
+    # Default to north for now
+    return stairs_vertices((x, y, z), 'north', n)
+
+def door_vertices(pos, facing='north', is_open=False, hinge='left', n=0.5):
+    """Generate vertices for a door (thin vertical rectangle)"""
+    x, y, z = pos
+    thickness = 0.1875  # 3/16 of a block (like Minecraft doors)
+    
+    if facing == 'north':  # door faces north
+        if not is_open:
+            # Closed door (thin rectangle along X axis)
+            door_faces = [
+                # Front face (south side)
+                (x-n, y-n, z-thickness, x+n, y-n, z-thickness, x+n, y+n, z-thickness, x-n, y+n, z-thickness),
+                # Back face (north side)
+                (x-n, y-n, z+thickness, x+n, y-n, z+thickness, x+n, y+n, z+thickness, x-n, y+n, z+thickness),
+                # Left face
+                (x-n, y-n, z-thickness, x-n, y-n, z+thickness, x-n, y+n, z+thickness, x-n, y+n, z-thickness),
+                # Right face
+                (x+n, y-n, z-thickness, x+n, y-n, z+thickness, x+n, y+n, z+thickness, x+n, y+n, z-thickness),
+                # Top face
+                (x-n, y+n, z-thickness, x+n, y+n, z-thickness, x+n, y+n, z+thickness, x-n, y+n, z+thickness),
+                # Bottom face
+                (x-n, y-n, z-thickness, x+n, y-n, z-thickness, x+n, y-n, z+thickness, x-n, y-n, z+thickness)
+            ]
+        else:
+            # Open door (rotated 90 degrees)
+            if hinge == 'left':
+                # Door opens to the right (from viewer's perspective)
+                door_faces = [
+                    # Front face (when open, faces east)
+                    (x-thickness, y-n, z-n, x+thickness, y-n, z-n, x+thickness, y+n, z-n, x-thickness, y+n, z-n),
+                    # Back face
+                    (x-thickness, y-n, z+n, x+thickness, y-n, z+n, x+thickness, y+n, z+n, x-thickness, y+n, z+n),
+                    # Left face
+                    (x-thickness, y-n, z-n, x-thickness, y-n, z+n, x-thickness, y+n, z+n, x-thickness, y+n, z-n),
+                    # Right face
+                    (x+thickness, y-n, z-n, x+thickness, y-n, z+n, x+thickness, y+n, z+n, x+thickness, y+n, z-n),
+                    # Top face
+                    (x-thickness, y+n, z-n, x+thickness, y+n, z-n, x+thickness, y+n, z+n, x-thickness, y+n, z+n),
+                    # Bottom face
+                    (x-thickness, y-n, z-n, x+thickness, y-n, z-n, x+thickness, y-n, z+n, x-thickness, y-n, z+n)
+                ]
+            else:
+                # Door opens to the left (hinge on right)
+                door_faces = [
+                    # Similar but mirrored
+                    (x-thickness, y-n, z-n, x+thickness, y-n, z-n, x+thickness, y+n, z-n, x-thickness, y+n, z-n),
+                    (x-thickness, y-n, z+n, x+thickness, y-n, z+n, x+thickness, y+n, z+n, x-thickness, y+n, z+n),
+                    (x-thickness, y-n, z-n, x-thickness, y-n, z+n, x-thickness, y+n, z+n, x-thickness, y+n, z-n),
+                    (x+thickness, y-n, z-n, x+thickness, y-n, z+n, x+thickness, y+n, z+n, x+thickness, y+n, z-n),
+                    (x-thickness, y+n, z-n, x+thickness, y+n, z-n, x+thickness, y+n, z+n, x-thickness, y+n, z+n),
+                    (x-thickness, y-n, z-n, x+thickness, y-n, z-n, x+thickness, y-n, z+n, x-thickness, y-n, z+n)
+                ]
+    else:
+        # For other facings, we'd rotate the coordinates
+        # For now, default to north
+        return door_vertices(pos, 'north', is_open, hinge, n)
+    
+    return door_faces
+
 
 def flatten(lst): return sum(map(list, lst), [])
 
