@@ -91,11 +91,16 @@ class Player:
             base_speed = self.speed
         
             # Handle sprinting
+            key = pygame.key.get_pressed()
             if key[pygame.K_LCTRL]:
-                self.is_sprinting = True
-                base_speed += 0.009  # Sprint boost
+                self.current_fov = 110  # Sprint FOV
+                base_speed += 0.012  # Sprint boost
             else:
-                self.is_sprinting = False
+                self.current_fov = 100  # Normal FOV
+            glMatrixMode(GL_PROJECTION)
+            glLoadIdentity()
+            gluPerspective(self.current_fov, (self.gl.WIDTH/self.gl.HEIGHT), 0.1, RENDER_DISTANCE)
+            glMatrixMode(GL_MODELVIEW)
             
             # Handle sneaking
             if key[pygame.K_LSHIFT]:
