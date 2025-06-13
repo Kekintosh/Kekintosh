@@ -18,7 +18,8 @@ class CubeHandler:
         self.gl = gl
         self.fluids = {}
         self.collidable = {}
-
+        self.collidable_slabs = {}
+        self.collidable_stairs = {}
         '''self.top_color = ('c3f', (0.1,) * 12)
         self.ns_color = ('c3f', (0.1,) * 12)
         self.ew_color = ('c3f', (0.1,) * 12)
@@ -82,6 +83,17 @@ class CubeHandler:
             return
     
         if cube.is_slab:
+            # Handle slab collision - half-height blocks
+            shown = any(cube.shown.values())
+            if shown:
+                if (cube.name != 'water' and cube.name != 'lava') and cube.p not in self.collidable_slabs:
+                    self.collidable_slabs[cube.p] = cube
+                    print(f"Added slab at {cube.p} to collidable_slabs")
+            else:
+                if cube.p in self.collidable_slabs:
+                    print(f"removed slab at {cube.p} to collidable_slabs")
+                    del self.collidable_slabs[cube.p]
+                return
             # Handle slab rendering
             if not hasattr(cube, 'slab_faces_rendered') or not cube.slab_faces_rendered:
                 v = slab_vertices(cube.p)
@@ -95,7 +107,18 @@ class CubeHandler:
                         cube.faces[f[i]] = show(v[i], cube.t[i] if isinstance(cube.t, list) else cube.t, f[i], clrC=customColor)
             return
     
-        if cube.is_stairs:
+        if cube.is_stairs:  
+            # Handle stairs collision - stepped blocks
+            shown = any(cube.shown.values())
+            if shown:
+                if (cube.name != 'water' and cube.name != 'lava') and cube.p not in self.collidable_stairs:
+                    self.collidable_stairs[cube.p] = cube
+                    print(f"Added stair at {cube.p} to collidable_slabs")
+            else:
+                if cube.p in self.collidable_stairs:
+                    del self.collidable_stairs[cube.p]
+                    print(f"Removed stair at {cube.p} from collidable_slabs")
+                return
             # Handle stairs rendering
             if not hasattr(cube, 'stairs_faces') or not cube.stairs_faces:
                 v = stairs_vertices(cube.p, cube.stairs_facing)
@@ -111,6 +134,14 @@ class CubeHandler:
             if cube.p in self.collidable:
                 del self.collidable[cube.p]
             return
+
+
+
+
+
+
+
+
 
         show = self.show
         v = cube_vertices(cube.p)
@@ -189,6 +220,8 @@ class CubeHandler:
             return
         if p in self.fluids:
             self.fluids.pop(p)
+        if p in self.collidable:
+           self.collidable.pop(p)
     
         cube = self.cubes.pop(p)
 
@@ -236,12 +269,18 @@ class CubeHandler:
                     if face:
                         face.delete()
     
-        # Handle slab removal
         elif cube.is_slab:  # <-- Explicit slab handling
-            if hasattr(cube, 'slab_faces') and cube.slab_faces:
-                for face in cube.slab_faces:
-                    if face:
-                        face.delete()
+            if hasattr(cube, 'faces') and cube.faces:
+                f = 'left', 'right', 'bottom', 'top', 'back', 'front'
+                for face_name in cube.collidable_slabs:
+                    if cube.faces[face_name]:
+                        cube.faces[face_name].delete()
+                        cube.faces[face_name] = None
+    
+            # Reset the rendering flag so it can be re-rendered if needed
+            if hasattr(cube, 'slab_faces_rendered'):
+                cube.slab_faces_rendered = False
+                    
     
         # Handle regular block removal
         else:
@@ -297,7 +336,20 @@ class CubeHandler:
             rendered_faces.append(face)
     
         return rendered_faces
-
+    def show_door(self, faces_list, t):
+        """Render door as multiple faces (for both closed and open states)"""
+        rendered_faces = []
+        texture = self._validate_texture(t)
+    
+        for face_verts in faces_list:
+            # Each face of the door gets rendered with the appropriate texture
+            face = self.opaque.add(4, GL_QUADS, texture,
+                                 ('v3f', face_verts),
+                                 ('t2f', (0, 0, 1, 0, 1, 1, 0, 1)),
+                                 self.top_color)  # Using top color for doors
+            rendered_faces.append(face)
+    
+        return rendered_faces
     # Door interaction methods for CubeHandler:
     def toggle_door(self, pos):
         """Toggle a door between open and closed"""
