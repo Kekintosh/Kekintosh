@@ -13,10 +13,13 @@ from settings import *
 class Player:
     def __init__(self, x=0, y=0, z=0, rotation=[0, 0], gl=None):
         print("Init Player class...")
+      
 
+        self.WIDTH = WIDTH
+        self.HEIGHT = HEIGHT
         self.last_mouse_pos = None
         self.position, self.rotation = [x, y, z], rotation
-        self.speed = 0.06
+        self.speed = 0.05
         self.gl = gl
         self.gravity = 5.8
         self.tVel = 50
@@ -90,6 +93,8 @@ class Player:
             rotY = self.rotation[1] / 180 * math.pi
             base_speed = self.speed
         
+            
+            
             # Handle sprinting
             key = pygame.key.get_pressed()
             if key[pygame.K_LCTRL]:
@@ -101,8 +106,6 @@ class Player:
             glLoadIdentity()
             gluPerspective(self.current_fov, (self.gl.WIDTH/self.gl.HEIGHT), 0.1, RENDER_DISTANCE)
             glMatrixMode(GL_MODELVIEW)
-            
-            # Handle sneaking
             if key[pygame.K_LSHIFT]:
                 self.setShift(True)
                 base_speed -= 0.01  # Sneak slowdown
@@ -275,18 +278,12 @@ class Player:
 
         self.position = new_pos
 
+   
     def collide(self, pos):
-        # Void damage (from your original)
-        if -90 > pos[1] > -9000:
-            if not self.playerDead:
-                self.hp -= 2
-                self.gl.blockSound.damageByBlock("ahh", 1)
-                if self.hp <= 0:
-                    self.dead()
-
-        # Use your original collision system that worked
         p = list(pos)
         np = roundPos(pos)
+
+        # Handle regular cube collisions (with climbing from slabs)
         for face in ((-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)):
             for i in (0, 1, 2):
                 if not face[i]:
@@ -295,15 +292,115 @@ class Player:
                 pad = 0.25
                 if d < pad:
                     continue
+        
+                # Check for regular collidable cubes
                 for dy in (0, 1):
                     op = list(np)
                     op[1] -= dy
                     op[i] += face[i]
                     if tuple(op) in self.gl.cubes.collidable:
+                        # Check if we're on a slab and can climb up (only for horizontal faces)
+                        if face[1] == 0:  # Horizontal collision (X or Z axis)
+                            current_block = list(np)
+                            current_block[1] -= 1  # Check block below player
+                            if tuple(current_block) in self.gl.cubes.collidable_slabs:
+                                p[1] += 1.01  # Move up by 1.35 units
+                                self.dy = 0
+                                continue  # Skip regular collision to prevent falling
+                
+                        # Regular collision (push away)
                         p[i] -= (d - pad) * face[i]
                         if face[1]:
                             self.dy = 0
                         break
+
+        # Handle slab collisions separately
+        slab_positions = []
+        # Only check the current level and one level below more carefully
+        for dy in (0, 1):
+            op = list(np)
+            op[1] -= dy
+            if tuple(op) in self.gl.cubes.collidable_slabs:
+                slab_positions.append((tuple(op), dy))
+
+        for slab_pos, dy_offset in slab_positions:
+            slab_y = slab_pos[1] + 0.5  # Center of the block
+            slab_top = slab_y + 0.35    # Top of slab (0.5 + 0.35 = 0.85 from block bottom)
+            slab_bottom = slab_y - 0.5  # Bottom of block
+    
+            # Only process this slab if player is actually near its Y level
+            player_y = p[1]
+            if abs(player_y - slab_top) > 1.0:  # Skip if player is too far vertically
+                continue
+    
+            # Check if player is within slab height range
+            if player_y - 0.25 <= slab_top and player_y + 0.25 >= slab_bottom:
+                # Check X and Z collision with slab
+                if (abs(p[0] - (slab_pos[0] + 0.5)) < 0.75 and 
+                    abs(p[2] - (slab_pos[2] + 0.5)) < 0.75):
+            
+                    # Player is intersecting with slab, resolve collision
+                    # Push player to top of slab if coming from above OR from the side (for climbing)
+                    if player_y > slab_top - 0.1:  # Coming from above
+                        p[1] = slab_top + 0.25  # Player bottom at slab top
+                        self.dy = 0
+                        break  # Only handle one slab collision at a time
+                    elif player_y > slab_bottom - 0.25:  # Coming from side, enable climbing
+                        p[1] = slab_top + 0.25  # Push player up to top of slab
+                        self.dy = 0
+                        break
+                    else:
+                        # Player is below slab, push out horizontally
+                        dx = p[0] - (slab_pos[0] + 0.5)
+                        dz = p[2] - (slab_pos[2] + 0.5)
+                
+                        if abs(dx) > abs(dz):
+                            # Push along X axis
+                            if dx > 0:
+                                p[0] = slab_pos[0] + 1.25  # Right edge + padding
+                            else:
+                                p[0] = slab_pos[0] - 0.25  # Left edge - padding
+                        else:
+                            # Push along Z axis
+                            if dz > 0:
+                                p[2] = slab_pos[2] + 1.25  # Front edge + padding
+                            else:
+                                p[2] = slab_pos[2] - 0.25  # Back edge - padding
+                        break  # Only handle one slab collision at a time
+
+        # Prevent unexpected falling off slabs - check if player should stay on connected slabs
+        player_foot_y = p[1] - 0.25
+        current_block_pos = (int(p[0]), int(player_foot_y), int(p[2]))
+
+        # Check if we're standing on a slab
+        if tuple(current_block_pos) in self.gl.cubes.collidable_slabs:
+            slab_center_y = current_block_pos[1] + 0.5
+            slab_top_y = slab_center_y + 0.35
+    
+            # If player is close to slab top, keep them there
+            if abs(player_foot_y - slab_top_y) < 0.1:
+                p[1] = slab_top_y + 0.25
+
+        # Check adjacent slabs to prevent falling off edges
+        if abs(p[1] - 0.85 - int(p[1] - 0.85)) < 0.1:  # Player is roughly at slab height
+            # Check 4 adjacent positions for slabs
+            for dx, dz in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                adj_pos = (int(p[0] + dx * 0.6), int(p[1] - 0.6), int(p[2] + dz * 0.6))
+                if tuple(adj_pos) in self.gl.cubes.collidable_slabs:
+                    # There's an adjacent slab, check if we should be standing on it
+                    if (abs(p[0] - (adj_pos[0] + 0.5)) < 0.6 and 
+                        abs(p[2] - (adj_pos[2] + 0.5)) < 0.6):
+                        adj_slab_top = adj_pos[1] + 0.85
+                        if abs(p[1] - 0.25 - adj_slab_top) < 0.15:
+                            p[1] = adj_slab_top + 0.25
+                            self.dy = 0
+                            break
+
+        # Handle stairs (placeholder for future implementation)
+        # for stair_pos in self.gl.cubes.collidable_stairs:
+        #     pass  # TODO: Implement stair collision logic
+
+        # Return the updated position
         return tuple(p)
 
     # Keep existing methods unchanged
